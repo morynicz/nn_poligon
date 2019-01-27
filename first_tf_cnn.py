@@ -26,7 +26,7 @@ def main():
 
         learning_rate = 0.001
         beta = 0.001
-        num_epochs = 10
+        num_epochs = 11
 
         initializer = tf.contrib.layers.xavier_initializer(seed=seed)
 
@@ -56,13 +56,20 @@ def main():
             tf.summary.tensor_summary("W{}".format(name_postfix), w)
             a_prev = a
 
+    with tf.name_scope("Costs"):
+        cost = tf.reduce_mean(
+            tf.nn.softmax_cross_entropy_with_logits_v2(logits=tf.transpose(A[-1]), labels=tf.transpose(y)))
 
-    cost = tf.reduce_mean(
-        tf.nn.softmax_cross_entropy_with_logits_v2(logits=tf.transpose(A[-1]), labels=tf.transpose(y)))
-
-    regularized_cost = tf.reduce_mean(cost + beta * tf.contrib.layers.apply_regularization(tf.nn.l2_loss, W))
+        regularized_cost = tf.reduce_mean(cost + beta * tf.contrib.layers.apply_regularization(tf.nn.l2_loss, W))
+        tf.summary.histogram("regularized cost", regularized_cost)
+        tf.summary.histogram("cost", cost)
 
     optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(regularized_cost)
+
+    with tf.name_scope("Results"):
+        correct_prediction = tf.equal(tf.argmax(A[-1]), tf.argmax(y))
+        test_accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
+        train_accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
 
     init = tf.global_variables_initializer()
 
@@ -77,29 +84,26 @@ def main():
         start = datetime.datetime.now()
 
         for i in range(num_epochs):
-            epoch_cost = 0
-
             summary, _, epoch_cost = session.run([merged, optimizer, cost], feed_dict={x: x_train, y: y_train})
-            writer.add_summary(summary)
+            writer.add_summary(summary, i)
             costs.append(epoch_cost)
             if i % 10 == 0:
                 mean_time = (datetime.datetime.now() - start) / 10
                 print("epoch {} cost: {} mean time {}".format(i, epoch_cost, mean_time))
                 start = datetime.datetime.now()
 
-        with tf.name_scope("Results"):
-            correct_prediction = tf.equal(tf.argmax(A[-1]), tf.argmax(y))
-            accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
+        train_accuracy_val, summary = session.run([train_accuracy, merged], feed_dict={x: x_train, y: y_train})
+        writer.add_summary(summary)
+        test_accuracy_val, summary = session.run([test_accuracy, merged], feed_dict={x: x_test, y: y_test})
+        writer.add_summary(summary)
+        # ta = tf.summary.scalar('train accuracy', train_accuracy)
+        # te = tf.summary.scalar('test accuracy', test_accuracy)
+        # tc = tf.summary.scalar('costs', costs)
+        print("dup")
+        # summary = session.run(tf.summary.merge([ta, te]))
 
-            train_accuracy = accuracy.eval({x: x_train, y: y_train})
-            test_accuracy = accuracy.eval({x: x_test, y: y_test})
-
-            tf.summary.scalar('train accuracy', train_accuracy)
-            tf.summary.scalar('test accuracy', test_accuracy)
-            tf.summary.scalar('costs', costs)
-
-
-        print("Train accuracy = {train}\nTest accuracy = {test}".format(train=train_accuracy, test=test_accuracy))
+        print(
+            "Train accuracy = {train}\nTest accuracy = {test}".format(train=train_accuracy_val, test=test_accuracy_val))
 
         plt.plot(np.squeeze(costs))
         plt.ylabel('cost')
@@ -123,8 +127,8 @@ def preprocess_input(x_train_r):
     return x_train
 
 
-def identity(input):
-    return input
+def identity(arg):
+    return arg
 
 
 def make_fc_layer(name_postfix, input, n_outputs, activation, initializer):
