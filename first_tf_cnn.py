@@ -1,4 +1,5 @@
 import datetime
+import random
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,11 +23,25 @@ def main():
     y = tf.placeholder(dtype="float", shape=[y_train.shape[0], None], name="output")
 
     seed = 5
+
+    # x_d = tf.data.Dataset.from_tensors()
+    # y_d = tf.data.Dataset.from_tensors()
+    d = tf.data.Dataset.from_tensor_slices((tf.transpose(x_train), tf.transpose(y_train)))
+    print(d)
+    d_b = d.shuffle(buffer_size=128).batch(512, False)
+    it = d_b.make_one_shot_iterator().get_next()
+    # print(it)
+    # for xit, yit in it:
+        # print(xit)
+    # print(d_b)
+    # batches = generate_batches(x_train, y_train, 1, seed)
+    # return
+
     with tf.name_scope('hyper_parameters'):
 
         learning_rate = 0.001
         beta = 0.001
-        num_epochs = 11
+        num_epochs = 10
 
         initializer = tf.contrib.layers.xavier_initializer(seed=seed)
 
@@ -43,18 +58,8 @@ def main():
 
         for n_outputs, activation, name_postfix in layer_params:
             tf.summary.scalar("numer of hidden units in layer {}".format(name_postfix), n_outputs)
-            # tf.summary.scalar("numer of hidden units in layer {}".format(name_postfix), n_outputs)
 
-    A, W, B = [], [], []
-    a_prev = x
-    for n_outputs, activation, name_postfix in layer_params:
-        with tf.name_scope("Weights"):
-            a, w, b = make_fc_layer(name_postfix, a_prev, n_outputs, activation, initializer)
-            A.append(a)
-            W.append(w)
-            B.append(b)
-            tf.summary.tensor_summary("W{}".format(name_postfix), w)
-            a_prev = a
+    A, W, B = build_fc_layers(initializer, layer_params, x)
 
     with tf.name_scope("Costs"):
         cost = tf.reduce_mean(
@@ -74,17 +79,22 @@ def main():
     init = tf.global_variables_initializer()
 
     costs = []
+
+
     with tf.Session() as session:
         writer = tf.summary.FileWriter("tmp/log/", session.graph)
         merged = tf.summary.merge_all()
 
         session.run(init)
 
-        print("x: {} , y: {}".format(x_train.shape, y_train.shape))
         start = datetime.datetime.now()
 
         for i in range(num_epochs):
-            summary, _, epoch_cost = session.run([merged, optimizer, cost], feed_dict={x: x_train, y: y_train})
+            # batches = generate_batches(x_train, y_train, 1, seed)
+            x_batch, y_batch = it
+            print(x_batch)
+            print(y_batch)
+            summary, _, epoch_cost = session.run([merged, optimizer, cost], feed_dict={x: x_batch, y: y_batch})
             writer.add_summary(summary, i)
             costs.append(epoch_cost)
             if i % 10 == 0:
@@ -96,22 +106,44 @@ def main():
         writer.add_summary(summary)
         test_accuracy_val, summary = session.run([test_accuracy, merged], feed_dict={x: x_test, y: y_test})
         writer.add_summary(summary)
-        # ta = tf.summary.scalar('train accuracy', train_accuracy)
-        # te = tf.summary.scalar('test accuracy', test_accuracy)
-        # tc = tf.summary.scalar('costs', costs)
-        print("dup")
-        # summary = session.run(tf.summary.merge([ta, te]))
 
-        print(
-            "Train accuracy = {train}\nTest accuracy = {test}".format(train=train_accuracy_val, test=test_accuracy_val))
+        print("Train accuracy = {train} (e={train_error})\nTest accuracy = {test} (e={test_error})".format(
+            train=train_accuracy_val,
+            train_error=(1-train_accuracy_val),
+            test=test_accuracy_val,
+            test_error=(1-test_accuracy_val)))
 
         plt.plot(np.squeeze(costs))
         plt.ylabel('cost')
         plt.xlabel('iterations')
         plt.title("Learning rate =" + str(learning_rate))
+        plt.grid(True)
         plt.show()
 
         writer.close()
+
+
+def generate_batches(x_train, y_train, num_batches, seed):
+    print(x_train)
+    zipped = [el for el in zip(x_train, y_train)]
+    random.seed(seed)
+    shuffled = random.sample(zipped, len(zipped))
+    print(shuffled)
+    return [(x_train, y_train)]
+
+
+def build_fc_layers(initializer, layer_params, x):
+    A, W, B = [], [], []
+    a_prev = x
+    for n_outputs, activation, name_postfix in layer_params:
+        with tf.name_scope("Weights"):
+            a, w, b = make_fc_layer(name_postfix, a_prev, n_outputs, activation, initializer)
+            A.append(a)
+            W.append(w)
+            B.append(b)
+            tf.summary.tensor_summary("W{}".format(name_postfix), w)
+            a_prev = a
+    return A, W, B
 
 
 def preprocess_output(num_classes, y_train_r):
